@@ -89,32 +89,33 @@ async function realCorrelation(
 
     // Map of followerAddress -> { totalCorrelated, totalLagMs }
     const followerMap = new Map<string, { count: number; totalLagMs: number; coins: Set<string> }>();
+    let fillsWithDbData = 0;
 
     // Run queries in parallel batches of 5
     for (let i = 0; i < recentFills.length; i += 5) {
       const batch = recentFills.slice(i, i + 5);
 
       await Promise.all(batch.map(async (fill) => {
-        const fillTime = new Date(fill.time).toISOString();
         const afterTime = new Date(fill.time + MIN_LAG_MS).toISOString();
         const beforeTime = new Date(fill.time + MAX_LAG_MS).toISOString();
         const isBuy = fill.side === "B";
 
-        // Find trades on the same coin in the copy window
-        // If target bought, look for other buyers (exclude target themselves)
+        // If target bought, look for other buyers; if sold, look for other sellers.
+        // Don't filter by "side" column — that's the aggressor side, not buyer/seller.
+        // The buyer/seller columns already encode direction.
         const addressColumn = isBuy ? "buyer" : "seller";
 
         const { data: trades, error } = await supabase!
           .from("trades")
           .select("buyer, seller, ts, sz, px")
           .eq("coin", fill.coin)
-          .eq("side", fill.side)
           .gte("ts", afterTime)
           .lte("ts", beforeTime)
           .neq(addressColumn, normalizedTarget)
           .limit(50);
 
         if (error || !trades) return;
+        if (trades.length > 0) fillsWithDbData++;
 
         for (const trade of trades) {
           const followerAddr = isBuy ? trade.buyer : trade.seller;
@@ -138,6 +139,8 @@ async function realCorrelation(
       }));
     }
 
+    console.log(`[correlation] fillsWithDbData=${fillsWithDbData}/${recentFills.length}, followerMap size=${followerMap.size}`);
+
     // Filter to confirmed copy-traders (3+ correlated trades)
     const confirmedFollowers: FollowerInfo[] = [];
     let totalLagMs = 0;
@@ -158,7 +161,13 @@ async function realCorrelation(
     }
 
     if (confirmedFollowers.length === 0) {
-      // No confirmed followers found — still return real result (0 followers)
+      // If fewer than 5 fills had any matching DB data, our coverage is too sparse
+      // to draw conclusions — fall back to heuristic so the user sees something useful
+      if (fillsWithDbData < 5) {
+        console.log(`[correlation] Insufficient DB coverage (${fillsWithDbData} fills with data), falling back to heuristic`);
+        return null;
+      }
+      // Good coverage but genuinely no followers found
       return {
         totalFollowers: 0,
         avgLagMs: 0,

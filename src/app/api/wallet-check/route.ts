@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "No activity found for this address on Hyperliquid. Make sure this is an active HL trading wallet.",
+            "No perpetual trading activity found for this address. Shield TX analyzes perp positions — this wallet may only have spot or staking activity.",
         },
         { status: 404 }
       );
