@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+@theme {
+  --color-shieldtx-bg: #0A0A0F;
+  --color-shieldtx-surface: #12121A;
+  --color-shieldtx-border: #2A2A3A;
+  --color-shieldtx-text: #E8E8F0;
+  --color-shieldtx-muted: #8888A0;
+  --color-shieldtx-green: #00FF88;
+  --color-shieldtx-red: #FF3366;
+  --color-shieldtx-amber: #FFB800;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-blink {
+  animation: blink 0.8s infinite;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out forwards;
+}
+
+/* Hide scrollbar for social proof horizontal scroll */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+html {
+  scroll-behavior: smooth;
+  background-color: #0A0A0F;
+  color: #E8E8F0;
+}
+
+body {
+  background-color: var(--color-shieldtx-bg);
+  color: var(--color-shieldtx-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-blink,
+  .animate-fade-in {
+    animation: none;
+  }
+}
+
+::selection {
+  background-color: rgba(0, 255, 136, 0.2);
+  color: #E8E8F0;
+}
