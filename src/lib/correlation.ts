@@ -84,17 +84,17 @@ async function realCorrelation(
     // If target bought (side "B"), copiers also bought — look for them as buyers.
     // If target sold (side "A"), copiers also sold — look for them as sellers.
 
-    // Take the most recent 200 fills to keep the query reasonable
-    const recentFills = fills.slice(0, 200);
+    // Take only the 20 most recent fills — keeps query count under 2 seconds
+    const recentFills = fills.slice(0, 20);
 
     // Map of followerAddress -> { totalCorrelated, totalLagMs }
     const followerMap = new Map<string, { count: number; totalLagMs: number; coins: Set<string> }>();
 
-    // Process in batches of 20 fills to avoid huge queries
-    for (let i = 0; i < recentFills.length; i += 20) {
-      const batch = recentFills.slice(i, i + 20);
+    // Run queries in parallel batches of 5
+    for (let i = 0; i < recentFills.length; i += 5) {
+      const batch = recentFills.slice(i, i + 5);
 
-      for (const fill of batch) {
+      await Promise.all(batch.map(async (fill) => {
         const fillTime = new Date(fill.time).toISOString();
         const afterTime = new Date(fill.time + MIN_LAG_MS).toISOString();
         const beforeTime = new Date(fill.time + MAX_LAG_MS).toISOString();
@@ -104,7 +104,7 @@ async function realCorrelation(
         // If target bought, look for other buyers (exclude target themselves)
         const addressColumn = isBuy ? "buyer" : "seller";
 
-        const { data: trades, error } = await supabase
+        const { data: trades, error } = await supabase!
           .from("trades")
           .select("buyer, seller, ts, sz, px")
           .eq("coin", fill.coin)
@@ -114,7 +114,7 @@ async function realCorrelation(
           .neq(addressColumn, normalizedTarget)
           .limit(50);
 
-        if (error || !trades) continue;
+        if (error || !trades) return;
 
         for (const trade of trades) {
           const followerAddr = isBuy ? trade.buyer : trade.seller;
@@ -135,7 +135,7 @@ async function realCorrelation(
             });
           }
         }
-      }
+      }));
     }
 
     // Filter to confirmed copy-traders (3+ correlated trades)
