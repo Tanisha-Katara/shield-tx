@@ -7,7 +7,7 @@ const MIN_CORRELATED_TRADES = 3;
 const MIN_LAG_MS = 2_000;
 const MAX_LAG_MS = 60_000;
 // Minimum trade rows in DB to consider real correlation reliable
-const MIN_DB_TRADES = 5_000;
+const MIN_DB_TRADES = 100;
 
 // ============================================================
 // Public API — picks real or heuristic mode automatically
@@ -26,8 +26,10 @@ export async function analyzeExposure(
   // Try real correlation if Supabase is configured and has data
   if (supabase) {
     const hasData = await checkDataAvailability();
+    console.log(`[correlation] Supabase configured=true, hasData=${hasData}`);
     if (hasData) {
       const result = await realCorrelation(fills, address);
+      console.log(`[correlation] Real correlation result: ${result ? result.totalFollowers + ' followers' : 'null (fell back)'}`);
       if (result) {
         return {
           ...result,
@@ -37,6 +39,8 @@ export async function analyzeExposure(
         };
       }
     }
+  } else {
+    console.log("[correlation] Supabase not configured, using heuristic");
   }
 
   // Fall back to heuristic
