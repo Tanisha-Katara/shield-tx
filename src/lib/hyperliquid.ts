@@ -1,4 +1,4 @@
-import { ClearinghouseState, Fill } from "./types";
+import { ClearinghouseState, Fill, SpotClearinghouseState, SpotMeta } from "./types";
 
 const HL_API_URL = "https://api.hyperliquid.xyz/info";
 
@@ -30,6 +30,19 @@ export async function getUserFills(address: string): Promise<Fill[]> {
     type: "userFills",
     user: address,
   });
+}
+
+export async function getSpotClearinghouseState(
+  address: string
+): Promise<SpotClearinghouseState> {
+  return hlPost<SpotClearinghouseState>({
+    type: "spotClearinghouseState",
+    user: address,
+  });
+}
+
+export async function getSpotMeta(): Promise<SpotMeta> {
+  return hlPost<SpotMeta>({ type: "spotMeta" });
 }
 
 export function isValidAddress(address: string): boolean {

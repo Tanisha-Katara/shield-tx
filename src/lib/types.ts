@@ -52,6 +52,24 @@ export interface ExposureResult {
   recentFills: number;
   scanPeriodDays: number;
   isEstimate: boolean;
+  analysisMode: "perp" | "spot";
+}
+
+export interface SpotBalance {
+  coin: string;
+  token: number;
+  hold: string;
+  total: string;
+  entryNtl: string;
+}
+
+export interface SpotClearinghouseState {
+  balances: SpotBalance[];
+}
+
+export interface SpotMeta {
+  tokens: Array<{ index: number; name: string }>;
+  universe: Array<{ tokens: [number, number]; name: string }>;
 }
 
 export interface PricingTier {

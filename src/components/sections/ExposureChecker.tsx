@@ -21,7 +21,7 @@ export function ExposureChecker() {
         Paste your wallet. See who&apos;s copying you.
       </h2>
       <p className="text-lg text-shieldtx-muted mb-10 max-w-2xl">
-        Real-time analysis of your Hyperliquid on-chain profile. No wallet connection required.
+        Real-time exposure analysis of your Hyperliquid trading activity. No wallet connection required.
       </p>
 
       <WalletInput onSubmit={checkWallet} loading={status === "loading"} />
@@ -43,6 +43,11 @@ export function ExposureChecker() {
       {/* Results */}
       {status === "success" && result && (
         <div className="mt-10 space-y-8">
+          {result.analysisMode === "spot" && (
+            <div className="font-mono text-sm text-shieldtx-amber border border-shieldtx-amber/30 bg-shieldtx-amber/5 px-4 py-3 mb-4">
+              No perpetual positions found. Showing how your spot transactions are being copied.
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <ExposureResultCard
               label="Correlated Wallets"

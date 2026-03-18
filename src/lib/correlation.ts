@@ -1,4 +1,4 @@
-import { ClearinghouseState, Fill, ExposureResult, FollowerInfo } from "./types";
+import { ClearinghouseState, Fill, ExposureResult, FollowerInfo, SpotClearinghouseState } from "./types";
 import { supabase } from "./supabase";
 
 // Minimum correlated trades to count as a confirmed copy-trader
@@ -36,6 +36,7 @@ export async function analyzeExposure(
           accountValue,
           openPositions,
           recentFills: fills.length,
+          analysisMode: "perp",
         };
       }
     }
@@ -175,6 +176,7 @@ async function realCorrelation(
         followers: [],
         scanPeriodDays: 7,
         isEstimate: false,
+        analysisMode: "perp",
       };
     }
 
@@ -192,6 +194,7 @@ async function realCorrelation(
       followers: confirmedFollowers.slice(0, 10), // Top 10
       scanPeriodDays: 7,
       isEstimate: false,
+      analysisMode: "perp",
     };
   } catch (err) {
     console.error("Real correlation failed, falling back:", err);
@@ -243,6 +246,53 @@ function heuristicAnalysis(
     recentFills,
     scanPeriodDays: 7,
     isEstimate: true,
+    analysisMode: "perp",
+  };
+}
+
+// ============================================================
+// Spot exposure analysis (fallback when no perp activity)
+// ============================================================
+
+export function analyzeSpotExposure(
+  spotState: SpotClearinghouseState,
+  spotFills: Fill[]
+): ExposureResult {
+  const accountValue = spotState.balances.reduce(
+    (sum, b) => sum + Math.abs(parseFloat(b.entryNtl || "0")),
+    0
+  );
+  const openPositions = spotState.balances.filter(
+    (b) => b.coin !== "USDC" && parseFloat(b.total) !== 0
+  ).length;
+  const recentFills = spotFills.length;
+
+  const sizeScore = getAccountSizeScore(accountValue);
+  const activityScore = getActivityScore(recentFills);
+  const diversityScore = getDiversityScore(openPositions);
+  const visibilityScore = spotFills.length > 0
+    ? getVisibilityScore(accountValue, spotFills)
+    : 0.1;
+
+  const compositeScore =
+    sizeScore * 0.35 + activityScore * 0.25 + diversityScore * 0.2 + visibilityScore * 0.2;
+
+  const baseFollowers = Math.round(compositeScore * 20);
+  const totalFollowers = Math.max(2, baseFollowers + randomOffset(3));
+  const avgLagMs = Math.round(1200 + (1 - sizeScore) * 4000 + randomOffset(500));
+  const estimatedLeakageBps = Math.round(5 + compositeScore * 12 + randomOffset(2));
+
+  return {
+    totalFollowers,
+    avgLagMs,
+    estimatedLeakageBps,
+    followers: generateFollowerEstimates(totalFollowers, avgLagMs),
+    accountValue,
+    openPositions,
+    recentFills,
+    scanPeriodDays: 7,
+    isEstimate: true,
+    analysisMode: "spot",
   };
 }
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getClearinghouseState, getUserFills, isValidAddress } from "@/lib/hyperliquid";
-import { analyzeExposure } from "@/lib/correlation";
+import { getClearinghouseState, getUserFills, getSpotClearinghouseState, isValidAddress } from "@/lib/hyperliquid";
+import { analyzeExposure, analyzeSpotExposure } from "@/lib/correlation";
 
 const cache = new Map<string, { data: unknown; expires: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -54,25 +54,41 @@ export async function POST(request: NextRequest) {
       getUserFills(normalizedAddress),
     ]);
 
-    // Check if this wallet has any real activity on Hyperliquid
+    // Check if this wallet has any perp activity on Hyperliquid
     const accountValue = parseFloat(state.marginSummary.accountValue);
     const hasPositions = state.assetPositions.some(
       (p) => parseFloat(p.position.szi) !== 0
     );
-    const hasFills = fills.length > 0;
+    const perpFills = fills.filter((f) => !f.coin.startsWith("@"));
+    const hasPerpActivity = hasPositions || perpFills.length > 0 || accountValue >= 1;
 
-    if (!hasPositions && !hasFills && accountValue < 1) {
-      return NextResponse.json(
-        {
-          error:
-            "No perpetual trading activity found for this address. Shield TX analyzes perp positions — this wallet may only have spot or staking activity.",
-        },
-        { status: 404 }
+    let result;
+
+    if (hasPerpActivity) {
+      // Perp analysis (same as before)
+      result = await analyzeExposure(state, perpFills, normalizedAddress);
+    } else {
+      // No perp activity — try spot fallback
+      const spotFills = fills.filter((f) => f.coin.startsWith("@"));
+      const spotState = await getSpotClearinghouseState(normalizedAddress);
+
+      const hasSpotBalances = spotState.balances.some(
+        (b) => parseFloat(b.total) !== 0
       );
-    }
+      const hasSpotFills = spotFills.length > 0;
 
-    // Run analysis — uses real correlation if Supabase has data, heuristic otherwise
-    const result = await analyzeExposure(state, fills, normalizedAddress);
+      if (!hasSpotBalances && !hasSpotFills) {
+        return NextResponse.json(
+          {
+            error:
+              "No trading activity found for this address on Hyperliquid.",
+          },
+          { status: 404 }
+        );
+      }
+
+      result = analyzeSpotExposure(spotState, spotFills);
+    }
 
     // Cache the result
     cache.set(normalizedAddress, {
