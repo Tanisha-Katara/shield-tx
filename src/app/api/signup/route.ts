@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isValidAddress } from "@/lib/hyperliquid";
-
-// In-memory store for now. Replace with Supabase in Phase 4.
-const signups: Array<{
-  address: string;
-  email: string | null;
-  volumeRange: string;
-  createdAt: string;
-}> = [];
+import { supabase } from "@/lib/supabase";
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,22 +21,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check for duplicate
-    const exists = signups.some(
-      (s) => s.address.toLowerCase() === address.toLowerCase()
-    );
-    if (exists) {
-      return NextResponse.json({
-        message: "You're already on the list. We'll be in touch.",
-      });
-    }
+    const normalizedAddress = address.toLowerCase();
 
-    signups.push({
-      address: address.toLowerCase(),
-      email: email || null,
-      volumeRange: volumeRange || "not specified",
-      createdAt: new Date().toISOString(),
-    });
+    if (supabase) {
+      // Use Supabase
+      const { error } = await supabase.from("beta_signups").upsert(
+        {
+          address: normalizedAddress,
+          email: email?.trim() || null,
+          volume_range: volumeRange || null,
+        },
+        { onConflict: "address" }
+      );
+
+      if (error) {
+        console.error("Signup insert error:", error);
+        return NextResponse.json(
+          { error: "Something went wrong. Try again." },
+          { status: 500 }
+        );
+      }
+    } else {
+      // No Supabase — log to console as fallback
+      console.log("Beta signup (no DB):", { address: normalizedAddress, email, volumeRange });
+    }
 
     return NextResponse.json({
       message: "You're in. We'll reach out when your slot opens.",

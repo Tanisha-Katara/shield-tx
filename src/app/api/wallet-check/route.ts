@@ -54,8 +54,8 @@ export async function POST(request: NextRequest) {
       getUserFills(normalizedAddress),
     ]);
 
-    // Run heuristic analysis
-    const result = analyzeExposure(state, fills);
+    // Run analysis — uses real correlation if Supabase has data, heuristic otherwise
+    const result = await analyzeExposure(state, fills, normalizedAddress);
 
     // Cache the result
     cache.set(normalizedAddress, {

@@ -67,3 +67,15 @@ export interface SignupData {
   email?: string;
   volumeRange: string;
 }
+
+export interface DbTrade {
+  ts: string;
+  coin: string;
+  side: string;
+  px: number;
+  sz: number;
+  hash: string;
+  tid: number;
+  buyer: string;
+  seller: string;
+}
