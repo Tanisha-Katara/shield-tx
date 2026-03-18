@@ -1,23 +1,24 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import WebSocket from "ws";
 
 // --- Config ---
 
-const HL_API_URL = "https://api.hyperliquid.xyz/info";
+const HL_WS_URL = "wss://api.hyperliquid.xyz/ws";
 
-// Top perp markets by volume
 const TOP_COINS = [
   "BTC", "ETH", "SOL", "DOGE", "XRP",
   "AVAX", "ARB", "SUI", "LINK", "OP",
 ];
 
-// How often to poll each coin's recent trades (seconds)
-const POLL_INTERVAL_MS = 10_000;
+const FLUSH_INTERVAL_MS = 5_000;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
-const BATCH_SIZE = 200;
+const BATCH_SIZE = 500;
+const RECONNECT_DELAY_MS = 5_000;
+const SUBSCRIBE_DELAY_MS = 300; // stagger subscriptions
 
 // --- Types ---
 
-interface HlTrade {
+interface HlWsTrade {
   coin: string;
   side: string;
   px: string;
@@ -43,16 +44,18 @@ interface TradeRow {
 // --- State ---
 
 let supabase: SupabaseClient;
-// Track the last seen trade time per coin to avoid duplicates
-const lastSeenTime = new Map<string, number>();
+let ws: WebSocket | null = null;
 let buffer: TradeRow[] = [];
+let shouldReconnect = true;
 
-let stats = {
+const stats = {
   tradesReceived: 0,
   tradesInserted: 0,
-  pollCycles: 0,
+  flushCycles: 0,
   errors: 0,
+  reconnects: 0,
   startedAt: new Date(),
+  lastTradeAt: null as Date | null,
 };
 
 // --- Supabase ---
@@ -81,7 +84,6 @@ async function flushBuffer() {
     if (error) {
       console.error("[db] Insert error:", error.message);
       stats.errors++;
-      // Don't requeue on duplicate key errors
       if (!error.message.includes("duplicate")) {
         buffer.unshift(...batch);
       }
@@ -89,6 +91,7 @@ async function flushBuffer() {
     }
 
     stats.tradesInserted += batch.length;
+    stats.flushCycles++;
   } catch (err) {
     console.error("[db] Insert exception:", err);
     stats.errors++;
@@ -115,78 +118,78 @@ async function cleanupOldTrades() {
   }
 }
 
-// --- HL API Polling ---
+// --- WebSocket ---
 
-async function fetchRecentTrades(coin: string): Promise<HlTrade[]> {
-  try {
-    const res = await fetch(HL_API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "recentTrades", coin }),
-    });
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
-    if (!res.ok) {
-      console.error(`[api] ${coin} HTTP ${res.status}`);
-      return [];
+function connect() {
+  console.log("[ws] Connecting to", HL_WS_URL);
+  ws = new WebSocket(HL_WS_URL);
+
+  ws.on("open", async () => {
+    console.log("[ws] Connected");
+
+    // Subscribe to each coin with a small delay to avoid overwhelming the server
+    for (const coin of TOP_COINS) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) break;
+
+      const sub = JSON.stringify({
+        method: "subscribe",
+        subscription: { type: "trades", coin },
+      });
+      ws.send(sub);
+      console.log(`[ws] Subscribed to ${coin} trades`);
+      await sleep(SUBSCRIBE_DELAY_MS);
     }
+  });
 
-    const data = await res.json();
+  ws.on("message", (raw: Buffer) => {
+    try {
+      const msg = JSON.parse(raw.toString());
 
-    // recentTrades returns an array of trades
-    if (!Array.isArray(data)) return [];
-    return data as HlTrade[];
-  } catch (err) {
-    console.error(`[api] ${coin} fetch error:`, err);
+      if (msg.channel === "trades" && Array.isArray(msg.data)) {
+        for (const trade of msg.data as HlWsTrade[]) {
+          if (!trade.users || trade.users.length < 2) continue;
+
+          buffer.push({
+            ts: new Date(trade.time).toISOString(),
+            coin: trade.coin,
+            side: trade.side,
+            px: parseFloat(trade.px),
+            sz: parseFloat(trade.sz),
+            hash: trade.hash,
+            tid: trade.tid,
+            buyer: trade.users[0].toLowerCase(),
+            seller: trade.users[1].toLowerCase(),
+          });
+
+          stats.tradesReceived++;
+          stats.lastTradeAt = new Date();
+        }
+      }
+    } catch (err) {
+      console.error("[ws] Parse error:", err);
+      stats.errors++;
+    }
+  });
+
+  ws.on("close", (code: number, reason: Buffer) => {
+    console.log(`[ws] Closed: code=${code} reason=${reason.toString()}`);
+    ws = null;
+
+    if (shouldReconnect) {
+      stats.reconnects++;
+      console.log(`[ws] Reconnecting in ${RECONNECT_DELAY_MS / 1000}s...`);
+      setTimeout(connect, RECONNECT_DELAY_MS);
+    }
+  });
+
+  ws.on("error", (err: Error) => {
+    console.error("[ws] Error:", err.message);
     stats.errors++;
-    return [];
-  }
-}
-
-async function pollCoin(coin: string) {
-  const trades = await fetchRecentTrades(coin);
-  const lastTime = lastSeenTime.get(coin) || 0;
-  let maxTime = lastTime;
-
-  for (const trade of trades) {
-    // Skip trades we've already seen
-    if (trade.time <= lastTime) continue;
-    // Skip trades without user addresses
-    if (!trade.users || trade.users.length < 2) continue;
-
-    if (trade.time > maxTime) maxTime = trade.time;
-
-    buffer.push({
-      ts: new Date(trade.time).toISOString(),
-      coin: trade.coin || coin,
-      side: trade.side,
-      px: parseFloat(trade.px),
-      sz: parseFloat(trade.sz),
-      hash: trade.hash,
-      tid: trade.tid,
-      buyer: trade.users[0].toLowerCase(),
-      seller: trade.users[1].toLowerCase(),
-    });
-
-    stats.tradesReceived++;
-  }
-
-  if (maxTime > lastTime) {
-    lastSeenTime.set(coin, maxTime);
-  }
-}
-
-async function pollAll() {
-  // Poll coins sequentially with a small gap to respect rate limits
-  for (const coin of TOP_COINS) {
-    await pollCoin(coin);
-    // Small delay between coins to spread out API calls
-    await new Promise((r) => setTimeout(r, 200));
-  }
-
-  stats.pollCycles++;
-
-  // Flush after each full poll cycle
-  await flushAll();
+  });
 }
 
 // --- Stats ---
@@ -195,39 +198,37 @@ function printStats() {
   const uptime = Math.round(
     (Date.now() - stats.startedAt.getTime()) / 1000 / 60
   );
+  const lastTrade = stats.lastTradeAt
+    ? `${Math.round((Date.now() - stats.lastTradeAt.getTime()) / 1000)}s ago`
+    : "none";
   console.log(
-    `[stats] uptime=${uptime}m polls=${stats.pollCycles} received=${stats.tradesReceived} inserted=${stats.tradesInserted} buffer=${buffer.length} errors=${stats.errors}`
+    `[stats] uptime=${uptime}m received=${stats.tradesReceived} inserted=${stats.tradesInserted} buffer=${buffer.length} reconnects=${stats.reconnects} errors=${stats.errors} lastTrade=${lastTrade}`
   );
 }
 
 // --- Main ---
 
 async function main() {
-  console.log("Shield TX Trade Collector starting (REST polling mode)...");
+  console.log("Shield TX Trade Collector starting (WebSocket mode)...");
   console.log(`Tracking ${TOP_COINS.length} coins: ${TOP_COINS.join(", ")}`);
-  console.log(`Poll interval: ${POLL_INTERVAL_MS / 1000}s`);
 
   initSupabase();
+  connect();
 
-  // Initial poll
-  console.log("[poll] Running initial poll...");
-  await pollAll();
-  console.log(`[poll] Initial poll done. ${stats.tradesReceived} trades found.`);
-
-  // Start polling loop
-  const pollLoop = setInterval(pollAll, POLL_INTERVAL_MS);
+  // Flush buffer every 5 seconds
+  setInterval(flushAll, FLUSH_INTERVAL_MS);
 
   // Cleanup old trades every hour
-  const cleanupLoop = setInterval(cleanupOldTrades, CLEANUP_INTERVAL_MS);
+  setInterval(cleanupOldTrades, CLEANUP_INTERVAL_MS);
 
   // Print stats every minute
   setInterval(printStats, 60_000);
 
   // Graceful shutdown
   const shutdown = async () => {
-    console.log("[shutdown] Flushing remaining trades...");
-    clearInterval(pollLoop);
-    clearInterval(cleanupLoop);
+    console.log("[shutdown] Closing WebSocket and flushing...");
+    shouldReconnect = false;
+    if (ws) ws.close();
     await flushAll();
     console.log("[shutdown] Done");
     process.exit(0);
