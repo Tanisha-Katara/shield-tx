@@ -65,9 +65,11 @@ export function ExposureChecker() {
             />
           </div>
 
-          <div className="border border-shieldtx-border bg-shieldtx-surface p-6">
-            <CorrelationChart followers={result.followers} />
-          </div>
+          {result.followers.length > 0 && (
+            <div className="border border-shieldtx-border bg-shieldtx-surface p-6">
+              <CorrelationChart followers={result.followers} />
+            </div>
+          )}
 
           <p className="font-mono text-xs text-shieldtx-muted">
             Based on {result.recentFills} fills over {result.scanPeriodDays} days.
