@@ -13,28 +13,28 @@ export function Navbar() {
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-shieldtx-bg/80 backdrop-blur-md border-b border-shieldtx-border/50">
-      <div className="max-w-7xl mx-auto px-6 md:px-12 lg:px-20 h-16 flex items-center justify-between">
-        <span className="font-mono text-sm font-bold tracking-[0.2em] text-shieldtx-text">
+      <div className="max-w-7xl mx-auto px-6 md:px-12 lg:px-20 h-20 flex items-center justify-between">
+        <span className="font-mono text-base md:text-lg font-bold tracking-[0.2em] text-shieldtx-text">
           SHIELD TX
         </span>
 
         {/* Desktop nav */}
-        <div className="hidden md:flex items-center gap-8">
+        <div className="hidden md:flex items-center gap-10">
           <button
             onClick={() => scrollTo("how-it-works")}
-            className="font-mono text-xs text-shieldtx-muted hover:text-shieldtx-text transition-colors cursor-pointer"
+            className="font-mono text-sm text-shieldtx-muted hover:text-shieldtx-text transition-colors cursor-pointer"
           >
             How It Works
           </button>
           <button
             onClick={() => scrollTo("trust")}
-            className="font-mono text-xs text-shieldtx-muted hover:text-shieldtx-text transition-colors cursor-pointer"
+            className="font-mono text-sm text-shieldtx-muted hover:text-shieldtx-text transition-colors cursor-pointer"
           >
             Trust
           </button>
           <button
             onClick={() => scrollTo("pricing")}
-            className="font-mono text-xs text-shieldtx-muted hover:text-shieldtx-text transition-colors cursor-pointer"
+            className="font-mono text-sm text-shieldtx-muted hover:text-shieldtx-text transition-colors cursor-pointer"
           >
             Pricing
           </button>
